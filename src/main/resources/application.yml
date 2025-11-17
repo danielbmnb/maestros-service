@@ -1,0 +1,11 @@
+# Configuración mínima local
+# El resto viene del Config Server
+
+server:
+  port: ${SERVER_PORT:8082}
+
+info:
+  app:
+    name: maestros-service
+    description: Maestros Microservice - Core Data Management
+    version: 1.0.0

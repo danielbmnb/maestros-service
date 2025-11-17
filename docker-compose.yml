@@ -1,0 +1,140 @@
+version: '3.8'
+
+services:
+  # ============================================
+  # POSTGRESQL DATABASE
+  # ============================================
+  postgres:
+    image: postgres:15-alpine
+    container_name: payrollpro-postgres
+    environment:
+      POSTGRES_DB: payrollpro
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./init-db:/docker-entrypoint-initdb.d
+    networks:
+      - payrollpro-network
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # ============================================
+  # CONFIG SERVER
+  # ============================================
+  config-server:
+    build:
+      context: ./config-server
+      dockerfile: Dockerfile
+    container_name: config-server
+    ports:
+      - "8888:8888"
+    environment:
+      # ⭐ Perfil DOCKER
+      SPRING_PROFILES_ACTIVE: docker
+      
+      # GitHub
+      GIT_USERNAME: ${GIT_USERNAME}
+      GIT_TOKEN: ${GIT_TOKEN}
+      GIT_BRANCH: main
+      
+      # Eureka
+      EUREKA_ENABLED: "true"
+      EUREKA_SERVER_URL: http://eureka-server:8761/eureka/
+      HOSTNAME: config-server
+      
+      # Server
+      SERVER_PORT: 8888
+    networks:
+      - payrollpro-network
+    healthcheck:
+      test: ["CMD", "wget", "--spider", "-q", "http://localhost:8888/actuator/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 40s
+
+  # ============================================
+  # EUREKA SERVER
+  # ============================================
+  eureka-server:
+    build:
+      context: ./eureka-server
+      dockerfile: Dockerfile
+    container_name: eureka-server
+    ports:
+      - "8761:8761"
+    environment:
+      # ⭐ Perfil DOCKER
+      SPRING_PROFILES_ACTIVE: docker
+      
+      # Eureka
+      EUREKA_HOSTNAME: eureka-server
+      EUREKA_PREFER_IP: "false"
+      EUREKA_SELF_PRESERVATION: "true"
+      
+      # Server
+      SERVER_PORT: 8761
+    networks:
+      - payrollpro-network
+    depends_on:
+      config-server:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "wget", "--spider", "-q", "http://localhost:8761/actuator/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 40s
+
+  # ============================================
+  # MAESTROS SERVICE
+  # ============================================
+  maestros-service:
+    build:
+      context: ./maestros-service
+      dockerfile: Dockerfile
+    container_name: maestros-service
+    ports:
+      - "8081:8081"
+    environment:
+      # ⭐ Perfil DOCKER
+      SPRING_PROFILES_ACTIVE: docker
+      
+      # Config Server
+      CONFIG_SERVER_URL: http://config-server:8888
+      
+      # Database
+      DB_HOST: postgres
+      DB_PORT: 5432
+      DB_NAME: payrollpro
+      DB_USERNAME: postgres
+      DB_PASSWORD: postgres
+      
+      # Eureka
+      EUREKA_SERVER_URL: http://eureka-server:8761/eureka/
+      
+      # Server
+      SERVER_PORT: 8081
+    networks:
+      - payrollpro-network
+    depends_on:
+      postgres:
+        condition: service_healthy
+      config-server:
+        condition: service_healthy
+      eureka-server:
+        condition: service_healthy
+    restart: on-failure
+
+networks:
+  payrollpro-network:
+    driver: bridge
+
+volumes:
+  postgres_data:
